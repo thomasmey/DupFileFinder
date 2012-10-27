@@ -1,3 +1,7 @@
+/*
+ * Copyright 2012 Thomas Meyer
+ */
+
 package dupfilefinder;
 
 import java.io.FileNotFoundException;

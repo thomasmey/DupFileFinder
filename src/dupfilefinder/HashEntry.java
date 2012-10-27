@@ -1,3 +1,7 @@
+/*
+ * Copyright 2012 Thomas Meyer
+ */
+
 package dupfilefinder;
 
 public class HashEntry extends SortEntry<String,String> {
