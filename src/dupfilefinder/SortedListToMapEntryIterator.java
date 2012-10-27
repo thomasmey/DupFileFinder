@@ -13,11 +13,12 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Map.Entry;
+import java.util.Map;
 import java.util.Queue;
 
+// Map.Entry<String, Long>
 // Key=Long, Value=String, Entry=FileEntry<Key,Value>
-public class SortedListToMapEntryIterator<K extends Comparable<K>, V, E extends SortEntry<K,V>> implements Iterator<Entry<K, List<V>>> {
+public class SortedListToMapEntryIterator<K, V, E extends Map.Entry<K,V>> implements Iterator<Map.Entry<K, List<V>>> {
 
 	private Queue<E> entryQueue;
 	private K currentKey;
@@ -47,7 +48,7 @@ public class SortedListToMapEntryIterator<K extends Comparable<K>, V, E extends 
 	}
 
 	@Override
-	public Entry<K, List<V>> next() {
+	public Map.Entry<K, List<V>> next() {
 
 		E entry;
 		List<V> currentValueList = new ArrayList<V>();
@@ -56,7 +57,7 @@ public class SortedListToMapEntryIterator<K extends Comparable<K>, V, E extends 
 
 			// gruppenwechsel
 			if(!currentKey.equals(entry.getKey())) {
-				Entry<K, List<V>> ent =  new AbstractMap.SimpleEntry<K, List<V>>(currentKey, currentValueList);
+				Map.Entry<K, List<V>> ent =  new AbstractMap.SimpleEntry<K, List<V>>(currentKey, currentValueList);
 				currentKey = (K) entry.getKey();
 				return ent;
 			}
@@ -85,14 +86,13 @@ public class SortedListToMapEntryIterator<K extends Comparable<K>, V, E extends 
 			currentValueList.add(entry.getValue());
 		}
 
-		Entry<K, List<V>> ent = new AbstractMap.SimpleEntry<K, List<V>>(currentKey, currentValueList);
+		Map.Entry<K, List<V>> ent = new AbstractMap.SimpleEntry<K, List<V>>(currentKey, currentValueList);
 		return ent;
 
 	}
 
 	@Override
 	public void remove() {
-		// TODO Auto-generated method stub
+		throw new UnsupportedOperationException();
 	}
-
 }

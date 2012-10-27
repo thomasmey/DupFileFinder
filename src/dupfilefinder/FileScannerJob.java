@@ -7,33 +7,48 @@ package dupfilefinder;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.ObjectOutputStream;
+import java.util.AbstractMap;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Vector;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import jobcontrol.Job;
-import jobcontrol.JobCommon;
+public class FileScannerJob implements Runnable {
 
-public class FileScannerJob {
+	private final int chunkSize;
+	private final File folder;
 
-	private String sortFileName;
-	private int chunkSize;
-	private Logger log;
-	private List<FileEntry> fileEntryList = new Vector<FileEntry>();
-	private int chunkCount = 0;
+	private static int chunkCount;
+	private static String sortFileName;
+	private static Logger log;
+	private static Integer jobCount = new Integer(0);
 
-	public FileScannerJob () {
-	}
+	private static final List<Map.Entry<Long, String>> fileEntryList = new Vector<Map.Entry<Long, String>>();
+	private static final Comparator<Map.Entry<Long, String>> comparator = new Comparator<Map.Entry<Long, String>>() {
 
-	public FileScannerJob (Logger log, String sortFileName, int chunkSize) {
-		this.sortFileName = sortFileName;
+		@Override
+		public int compare(Map.Entry<Long, String> o1,
+				Map.Entry<Long, String> o2) {
+			return o1.getKey().compareTo(o2.getKey());
+		}
+	};
+
+	public FileScannerJob (Logger log, String sortFileName, int chunkSize, File folder) {
+		FileScannerJob.sortFileName = sortFileName;
+		FileScannerJob.log = log;
+
 		this.chunkSize = chunkSize;
-		this.log = log;
+		this.folder = folder;
+
+		synchronized (jobCount) {
+			jobCount++;
+		}
 	}
 
-	public void scanFolder(JobCommon jc, File folder) throws InterruptedException {
+	public void run() {
 
 		File[] files = folder.listFiles();
 
@@ -42,33 +57,40 @@ public class FileScannerJob {
 				if (file.isDirectory()) {
 					try {
 						if(file.getCanonicalPath().equals(file.getAbsolutePath())) {
-							// use our job as template and submit us again
-							Job j = new Job(jc);
-							j.setMainMethodParameters(new Object[] {jc, file});
-							Run.jc.submitJob(j);
+							FileScannerJob j = new FileScannerJob(FileScannerJob.log, FileScannerJob.sortFileName, this.chunkSize, file);
+							DupFileFinder.threadpool.submit(j);
 						} else
-							Run.log.log(Level.FINE, "Skipping {0} - Symbolic link detected!", file);
+							DupFileFinder.log.log(Level.FINE, "Skipping {0} - Symbolic link detected!", file);
 					} catch (Exception e) {
 						log.log(Level.SEVERE, "Exception", e);
 					}
 				} else {
-					FileEntry entry = new FileEntry(file.length(), file.getAbsolutePath());
-					fileEntryList.add(entry);						
+					Map.Entry<Long, String> entry = new AbstractMap.SimpleEntry<Long, String>(file.length(), file.getAbsolutePath());
+					fileEntryList.add(entry);
 				}
 			}
 		}
 
+		writeList(chunkSize);
+		synchronized (jobCount) {
+			jobCount--;
+			notifyAll();
+		}
+	}
+
+	private static void writeList(int maxSize) {
+
 		// get lock, to write out the list
 		synchronized (fileEntryList) {
-			if(fileEntryList.size() > chunkSize) {
-				Collections.sort(fileEntryList);
+			if(fileEntryList.size() > maxSize) {
+				Collections.sort(fileEntryList, comparator);
 
-				Run.log.log(Level.FINE, "Treashhold reached, writing to disk");
+				DupFileFinder.log.log(Level.FINE, "Treashhold reached, writing to disk");
 				File file = new File(sortFileName + "." + Thread.currentThread().getName() + "." + chunkCount);
 				try {
 					FileOutputStream fos =  new FileOutputStream(file);
 					ObjectOutputStream oos = new ObjectOutputStream(fos);
-					for(FileEntry e: fileEntryList) {
+					for(Map.Entry<Long, String> e: fileEntryList) {
 						oos.writeObject(e);
 					}
 					oos.close();
@@ -80,30 +102,15 @@ public class FileScannerJob {
 			}
 		}
 	}
-	
-	public void finish() {
-		
-		// get lock, to write out the list
-		synchronized (fileEntryList) {
-			if(fileEntryList.size() > 0) {
-				Collections.sort(fileEntryList);
 
-				Run.log.log(Level.FINE, "Treashhold reached, writing to disk");
-				File file = new File(sortFileName + "." + Thread.currentThread().getName() + "." + chunkCount);
+	public static void waitForJobs() {
+		synchronized (jobCount) {
+			while(jobCount > 0)
 				try {
-					FileOutputStream fos =  new FileOutputStream(file);
-					ObjectOutputStream oos = new ObjectOutputStream(fos);
-					for(FileEntry e: fileEntryList) {
-						oos.writeObject(e);
-					}
-					oos.close();
-					fos.close();
-				} catch (Exception e) {
-					log.log(Level.SEVERE, "Exception", e);
-				}
-				chunkCount++;
-				fileEntryList.clear();
-			}
+					jobCount.wait();
+				} catch (InterruptedException e) {}
 		}
+
+		writeList(0);
 	}
 }

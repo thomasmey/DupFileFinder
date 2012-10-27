@@ -4,83 +4,81 @@
 
 package dupfilefinder;
 
+import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.security.NoSuchAlgorithmException;
+import java.util.AbstractMap;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.logging.Logger;
+import java.util.concurrent.Callable;
 
-import jobcontrol.Job;
-import jobcontrol.JobCommon;
+class HashController implements Callable<Iterator<Map.Entry<String, List<Map.Entry<String, Long>>>>> {
 
-class HashController {
-
-	private String algorithm;
-	private int bufferSize;
-	private String sortFileName;
 	private final int noMaxObjects = 500000;
+	private final Iterator<Map.Entry<Long, List<String>>> fileSizeIterator;
+	private final String algorithm;
+	private final int bufferSize;
+	private final String sortFileName;
 
 	// key = hash as hex string, value = file paths
 	private Map<String, List<String>> duplicates = new HashMap<String, List<String>>();
 
-	public HashController(String sortFileName, String algorithm, int bufferSize) {
+	public HashController(String sortFileName, String algorithm, int bufferSize, Iterator<Map.Entry<Long, List<String>>> fileSizeIterator) {
 
-		// set static values of runner class
 		this.sortFileName=sortFileName;
 		this.bufferSize=bufferSize;
 		this.algorithm=algorithm;
-//		this.chunkSize=chunkSize;
-//		this.log=log;
+		this.fileSizeIterator = fileSizeIterator;
 	}
 
-	Iterator<Entry<String, List<String>>> findDuplicates(Iterator<Entry<Long, List<String>>> fileSizeIterator) throws NoSuchAlgorithmException, InterruptedException, IllegalArgumentException, SecurityException, IllegalAccessException, InvocationTargetException, NoSuchMethodException, FileNotFoundException, IOException, ClassNotFoundException {
+	public Iterator<Map.Entry<String, List<Map.Entry<String, Long>>>> call() throws NoSuchAlgorithmException, InterruptedException, IllegalArgumentException, SecurityException, IllegalAccessException, InvocationTargetException, NoSuchMethodException, FileNotFoundException, IOException, ClassNotFoundException {
 
-		Run.log.info("Starting hashing of files");
+		DupFileFinder.log.info("Starting hashing of files");
 
 		duplicates.clear();
 //		public HashJob(int bufferSize, String algorithm, String sortFileName, int chunkSize, Logger log) throws NoSuchAlgorithmException {
 
-		// create common job data -> call HashJob.run(FileEntry e);
-		JobCommon jc = new JobCommon(HashJob.class,
-				new Class[]  {int.class, String.class, String.class, int.class, Logger.class},
-				new Object[] {this.bufferSize, this.algorithm, this.sortFileName, this.noMaxObjects, Run.log},
-				"doHash",
-				new Class[] {FileEntry.class}, true);
-
 		while(fileSizeIterator.hasNext()) {
 			//    size, list of filenames
-			Entry<Long, List<String>> entry = fileSizeIterator.next();
+			Map.Entry<Long, List<String>> entry = fileSizeIterator.next();
 			// only process entry with multiple files of the same size!
 			if (entry.getValue().size() > 1) {
 				List<String> filePaths = entry.getValue();
 				Iterator<String> i1 = filePaths.iterator();
 				while(i1.hasNext()) {
 
-					FileEntry fe = new FileEntry(entry.getKey(), i1.next());
-					Job j = new Job(jc);
-					j.setMainMethodParameters(new Object[] {fe});
-					Run.jc.submitJob(j);
+					Map.Entry<Long, String> fileEntry = new AbstractMap.SimpleEntry<Long,String>(entry.getKey(), i1.next());
+					HashJob j = new HashJob(this.bufferSize, this.algorithm, this.sortFileName, this.noMaxObjects, DupFileFinder.log, fileEntry);
+					DupFileFinder.threadpool.submit(j);
 				}
 			}
 		}
 
 		// wait for jobs to finish
-		Run.jc.waitForEmptyQueue();
+		FileScannerJob.waitForJobs();
 
-		// write buffers to disk and destroy job class in worker threads
-		Run.jc.finishClass(HashJob.class);
-		
-		Run.log.info("Sort file list on disk");
-		SerializedMerger<HashEntry> externalSorter = new SerializedMerger<HashEntry>(sortFileName, noMaxObjects);
+		Comparator<Map.Entry<String, Map.Entry<String, Long>>> comparator = new Comparator<Map.Entry<String, Map.Entry<String, Long>>>() {
+
+			@Override
+			public int compare(Entry<String, Entry<String, Long>> o1,
+					Entry<String, Entry<String, Long>> o2) {
+				return o1.getKey().compareTo(o2.getKey());
+			}
+		};
+
+		DupFileFinder.log.info("Sort file list on disk");
+		File dir = new File(System.getProperty("user.dir"));
+		SerializedMerger<Map.Entry<String, Map.Entry<String, Long>>> externalSorter = new SerializedMerger<Map.Entry<String, Map.Entry<String, Long>>>(dir, sortFileName, noMaxObjects, comparator);
 		externalSorter.mergeSortedFiles();
 		externalSorter.close(true);
 	
-		return new SortedListToMapEntryIterator<String, String,HashEntry>(sortFileName);
+		return new SortedListToMapEntryIterator<String, Map.Entry<String, Long>, Map.Entry<String, Map.Entry<String, Long>>>(sortFileName);
 	}
 
 }

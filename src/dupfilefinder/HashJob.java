@@ -13,57 +13,85 @@ import java.io.ObjectOutputStream;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.AbstractMap;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Vector;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-public class HashJob {
+public class HashJob implements Runnable {
 
-	private MessageDigest messageDigest;
-	private byte[] digestBuffer;
-	private List<HashEntry> hashEntryList = new Vector<HashEntry>();
-	private int chunkCount = 0;
-	private String sortFileName;
-	private int chunkSize;
-	private Logger log;
+	private final MessageDigest messageDigest;
+	private final byte[] digestBuffer;
+	private final int chunkSize;
+	private final Map.Entry<Long, String> fileEntry;
 
-	public HashJob() {
-	}
+	private static int chunkCount;
+	private static String sortFileName;
+	private static Logger log;
+	private static Integer jobCount = new Integer(0);
 
-	public HashJob(int bufferSize, String algorithm, String sortFileName, int chunkSize, Logger log) throws NoSuchAlgorithmException {
+	private final static List<Map.Entry<String, Map.Entry<String, Long>>> hashEntryList = new Vector<Map.Entry<String, Map.Entry<String, Long>>>();
+	private static final Comparator<Map.Entry<String, Map.Entry<String, Long>>> comparator = new Comparator<Map.Entry<String, Map.Entry<String, Long>>>() {
+
+		@Override
+		public int compare(Map.Entry<String, Map.Entry<String, Long>> o1,
+				Map.Entry<String, Map.Entry<String, Long>> o2) {
+			return o1.getKey().compareTo(o2.getKey());
+		}
+	};
+
+	public HashJob(int bufferSize, String algorithm, String sortFileName, int chunkSize, Logger log, Map.Entry<Long, String> fileEntry) throws NoSuchAlgorithmException {
 		//throw an exception here if algorithm is not supported.
 		this.messageDigest = MessageDigest.getInstance(algorithm);
 		this.digestBuffer = new byte[bufferSize];
-		
-		this.sortFileName = sortFileName;
+
+		HashJob.sortFileName = sortFileName;
+		HashJob.log = log;
+
 		this.chunkSize = chunkSize;
-		this.log = log;
+		this.fileEntry = fileEntry;
+
+		synchronized (jobCount) {
+			jobCount++;
+		}
 	}
 
-	public void doHash(FileEntry fe) {
+	public void run() {
 
 		String hashString;
-		if(fe.getKey()>0)
-			hashString = calculateHash(fe.getValue());
+		if(fileEntry.getKey()>0)
+			hashString = calculateHash(fileEntry.getValue());
 		else
 			hashString = "00";
-		
-		HashEntry he = new HashEntry(hashString,fe.getValue(),fe.getKey());
+
+		Map.Entry<String, Map.Entry<String, Long>> he = new AbstractMap.SimpleEntry<String, Map.Entry<String, Long>> (hashString,
+				new AbstractMap.SimpleEntry<String, Long>(fileEntry.getValue(),fileEntry.getKey()));
 		hashEntryList.add(he);
+
+		writeList(chunkSize);
+		synchronized (jobCount) {
+			jobCount--;
+			notifyAll();
+		}
+	}
+
+	private static void writeList(int maxSize) {
 
 		// get lock, to write out the list
 		synchronized (hashEntryList) {
-			if(hashEntryList.size() > chunkSize) {
-				Collections.sort(hashEntryList);
+			if(hashEntryList.size() > maxSize) {
+				Collections.sort(hashEntryList, comparator);
 
-				Run.log.log(Level.FINE, "Treashhold reached, writing to disk");
+				DupFileFinder.log.log(Level.FINE, "Treashhold reached, writing to disk");
 				File file = new File(sortFileName + "." + Thread.currentThread().getName() + "." + chunkCount);
 				try {
 					FileOutputStream fos =  new FileOutputStream(file);
 					ObjectOutputStream oos = new ObjectOutputStream(fos);
-					for(HashEntry e: hashEntryList) {
+					for(Map.Entry<String, Map.Entry<String, Long>> e: hashEntryList) {
 						oos.writeObject(e);
 					}
 					oos.close();
@@ -74,6 +102,17 @@ public class HashJob {
 				hashEntryList.clear();
 			}
 		}
+	}
+
+	public static void waitForJobs() {
+		synchronized (jobCount) {
+			while(jobCount > 0)
+				try {
+					jobCount.wait();
+				} catch (InterruptedException e) {}
+		}
+
+		writeList(0);
 	}
 
 	private String calculateHash(String filePath){
@@ -91,7 +130,7 @@ public class HashJob {
 			return hashToHex(digest);
 
 		} catch(Exception e) {
-			Run.log.log(Level.SEVERE, "Could not read from file: {0}", filePath);
+			DupFileFinder.log.log(Level.SEVERE, "Could not read from file: {0}", filePath);
 		}
 		return null;
 	}
@@ -109,31 +148,4 @@ public class HashJob {
 
 		return hexString.toString();
 	}
-
-	public void finish() {
-		
-		// get lock, to write out the list
-		synchronized (hashEntryList) {
-			if(hashEntryList.size() > 0) {
-				Collections.sort(hashEntryList);
-
-				Run.log.log(Level.FINE, "Treashhold reached, writing to disk");
-				File file = new File(sortFileName + "." + Thread.currentThread().getName() + "." + chunkCount);
-				try {
-					FileOutputStream fos =  new FileOutputStream(file);
-					ObjectOutputStream oos = new ObjectOutputStream(fos);
-					for(HashEntry e: hashEntryList) {
-						oos.writeObject(e);
-					}
-					oos.close();
-					fos.close();
-				} catch (Exception e) {
-					log.log(Level.SEVERE, "Exception", e);
-				}
-				chunkCount++;
-				hashEntryList.clear();
-			}
-		}
-	}
-
 }

@@ -14,19 +14,21 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.PriorityQueue;
 import java.util.Queue;
 
-public class SerializedMerger<T extends SortEntry<?, ?>> {
+public class SerializedMerger<T> {
 
 	private final int noMaxObjects;
+	private final Comparator<? super T> comparator;
 
 	private ObjectInputStream[] ois;
 	private File[] inFile;
 	private ObjectOutputStream oos;
 
-	public SerializedMerger(final String sortFileName, int noMaxObjects) throws FileNotFoundException, IOException {
+	public SerializedMerger(File dir, final String sortFileName, int noMaxObjects, Comparator<? super T> comparator) throws FileNotFoundException, IOException {
 
 		if(noMaxObjects <=0)
 			throw new IllegalArgumentException("noMaxArguments is <=0");
@@ -37,9 +39,7 @@ public class SerializedMerger<T extends SortEntry<?, ?>> {
 		if(sortFileName != null && sortFileName.isEmpty())
 			throw new IllegalArgumentException("fileName is empty!");
 
-		// get working directory
-		File workDir = new File(System.getProperty("user.dir"));
-		File[] files = workDir.listFiles(new FilenameFilter() {
+		File[] files = dir.listFiles(new FilenameFilter() {
 
 				@Override
 				public boolean accept(File path, String name) {
@@ -48,17 +48,17 @@ public class SerializedMerger<T extends SortEntry<?, ?>> {
 			}
 		);
 
-
 		int noChunks = files.length;
-		ois    = new ObjectInputStream[noChunks];
+		ois = new ObjectInputStream[noChunks];
 		inFile = new File[noChunks];
-		for(int i=0; i< noChunks;i++) {
+		for(int i=0; i < noChunks;i++) {
 			inFile[i] = files[i];
 			ois[i] = new ObjectInputStream(new FileInputStream(inFile[i]));
 		}
-		
+
 		oos = new ObjectOutputStream(new FileOutputStream(sortFileName));
 		this.noMaxObjects = noMaxObjects;
+		this.comparator = comparator;
 	}
 
 	void mergeSortedFiles() throws IOException, ClassNotFoundException {
@@ -93,18 +93,18 @@ public class SerializedMerger<T extends SortEntry<?, ?>> {
 
 				if(!eof[j]) {
 					objcomp = objc.get(j);
-					if(objcomp==null) {
-						i=j;
+					if(objcomp == null) {
+						i = j;
 						break;
 					} else {
-						if(objprev==null) {
+						if(objprev == null) {
 							objprev = objcomp;
-							i=j;
+							i = j;
 						}
 
-						if( objcomp.compareTo(objprev)<0) {
+						if(comparator.compare(objcomp, objprev) < 0) {
 							objprev = objcomp;
-							i=j;
+							i = j;
 						}
 					}
 				}
@@ -133,14 +133,14 @@ public class SerializedMerger<T extends SortEntry<?, ?>> {
 			}
 
 			if (q.size() > noMaxObjects || eofAll) {
-				objw=q.peek();
-				for(;objw!=null;) {
-					if(objprev.compareTo(objw)<=0)
+				objw = q.peek();
+				for(; objw != null; ) {
+					if(comparator.compare(objprev, objw) <= 0)
 						break;
 					q.remove();
 					oos.writeObject(objw);
-					objw=q.peek();
-				}						
+					objw = q.peek();
+				}
 			}
 		}
 	}

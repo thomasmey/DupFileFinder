@@ -8,16 +8,14 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map.Entry;
+import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.logging.Level;
-import java.util.logging.Logger;
 
-import jobcontrol.Job;
-import jobcontrol.JobCommon;
-
-class FileScannerController {
+class FileScannerController implements Callable<Iterator<Map.Entry<Long, List<String>>>>{
 
 	private File startDir;
 	private String sortFileName;
@@ -28,12 +26,9 @@ class FileScannerController {
 		this.sortFileName = sortFileName;
 	}
 
-	Iterator<Entry<Long, List<String>>> doScan() throws InterruptedException, FileNotFoundException, IOException, ClassNotFoundException, IllegalArgumentException, SecurityException, IllegalAccessException, InvocationTargetException, NoSuchMethodException {
+	public Iterator<Map.Entry<Long, List<String>>> call() throws InterruptedException, FileNotFoundException, IOException, ClassNotFoundException, IllegalArgumentException, SecurityException, IllegalAccessException, InvocationTargetException, NoSuchMethodException {
 		
-		Run.log.info("Starting file scan");
-
-		// create common job data -> call FileStorageFSJob.scanFolder(JobCommon jc, File folder);
-		JobCommon jc = new JobCommon(FileScannerJob.class,new Class[] {Logger.class, String.class, int.class}, new Object[] {Run.log, this.sortFileName, this.noMaxObjects}, "scanFolder", new Class[] {JobCommon.class, File.class}, true);
+		DupFileFinder.log.info("Starting file scan");
 
 		int dirCount=0;
 		File[] files = startDir.listFiles();
@@ -44,39 +39,43 @@ class FileScannerController {
 					try {
 						if(file.getCanonicalPath().equals(file.getAbsolutePath())) {
 							// submit folder as job
-							Job j = new Job(jc);
-							j.setMainMethodParameters(new Object[] {jc, file});
-							Run.jc.submitJob(j);
+							FileScannerJob j = new FileScannerJob(DupFileFinder.log, this.sortFileName, this.noMaxObjects, file);
+							DupFileFinder.threadpool.submit(j);
 							dirCount++;
 						} else
-							Run.log.log(Level.FINE, "Skipping {0} - Symbolic link detected!", file);
+							DupFileFinder.log.log(Level.FINE, "Skipping {0} - Symbolic link detected!", file);
 					} catch (IOException e) {
-						Run.log.log(Level.SEVERE, "IOException", e);
+						DupFileFinder.log.log(Level.SEVERE, "IOException", e);
 					}
 				}
 			}
 		}
 
 		// startDir didn't contain any folders, submit startDir as job
-		if(dirCount==0) {
-			Job j = new Job(jc);
-			j.setMainMethodParameters(new Object[] {jc, startDir});
-			Run.jc.submitJob(j);
+		if(dirCount == 0) {
+			FileScannerJob j = new FileScannerJob(DupFileFinder.log, this.sortFileName, this.noMaxObjects, startDir);
+			DupFileFinder.threadpool.submit(j);
 		}
 
 		// wait for jobs to finish
-		Run.jc.waitForEmptyQueue();
+		FileScannerJob.waitForJobs();
 
-		// write buffers to disk and destroy job class in worker threads
-		Run.jc.finishClass(FileScannerJob.class);
-//		Run.jc.removeClass(FileStorageFSJob.class);
+		Comparator<Map.Entry<Long, String>> comparator = new Comparator<Map.Entry<Long, String>>() {
 
-		Run.log.info("Sort file list on disk");
-		SerializedMerger<FileEntry> externalSorter = new SerializedMerger<FileEntry>(sortFileName, noMaxObjects);
+			@Override
+			public int compare(Map.Entry<Long, String> o1,
+					Map.Entry<Long, String> o2) {
+				return o1.getKey().compareTo(o2.getKey());
+			}
+		};
+
+		DupFileFinder.log.info("Sort file list on disk");
+		File dir = new File(System.getProperty("user.dir"));
+		SerializedMerger<Map.Entry<Long, String>> externalSorter = new SerializedMerger<Map.Entry<Long, String>>(dir, sortFileName, noMaxObjects, comparator);
 		externalSorter.mergeSortedFiles();
 		externalSorter.close(true);
 	
-		return new SortedListToMapEntryIterator<Long,String,FileEntry>(sortFileName);
+		return new SortedListToMapEntryIterator<Long,String,Map.Entry<Long, String>>(sortFileName);
 	}
 
 }
