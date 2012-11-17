@@ -31,11 +31,11 @@ class DupFileFinder {
 		}
 		File startDir = new File(args[0]);
 
-		threadpool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() + 1);
-
+		int nThreads = Runtime.getRuntime().availableProcessors() + 1;
+		threadpool = Executors.newFixedThreadPool(nThreads);
 		log.info("Build file list.");
 
-		FileScannerController fsc = new FileScannerController("fileSizeArray.bin", startDir);
+		FileScannerController fsc = new FileScannerController("DupFileFinder", startDir);
 		Iterator<Map.Entry<Long, List<String>>> fileSizeIterator = fsc.call();
 
 		if(args.length == 2 && args[1].equals("onlyFileList")) {
@@ -59,7 +59,7 @@ class DupFileFinder {
 		log.log(Level.FINE, "Memory usage: {0} total bytes, {1} free bytes", new Object[] {Runtime.getRuntime().totalMemory(), Runtime.getRuntime().freeMemory()});
 
 		log.info("Looking for duplicates");
-		HashController checker = new HashController("hashListArray.bin", "SHA-1", 6 * 1024 * 1024, fileSizeIterator);
+		HashController checker = new HashController("DupFileFinder", "SHA-1", 6 * 1024 * 1024, fileSizeIterator);
 
 		Iterator<Map.Entry<String, List<Map.Entry<String, Long>>>> dupIter = checker.call();
 

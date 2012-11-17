@@ -4,7 +4,9 @@
 
 package dupfilefinder;
 
+import java.io.BufferedInputStream;
 import java.io.EOFException;
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.ObjectInputStream;
@@ -18,16 +20,16 @@ import java.util.Queue;
 
 // Map.Entry<String, Long>
 // Key=Long, Value=String, Entry=FileEntry<Key,Value>
-public class SortedListToMapEntryIterator<K, V, E extends Map.Entry<K,V>> implements Iterator<Map.Entry<K, List<V>>> {
+public class IndexEntryIterator<K, V, E extends Map.Entry<K,V>> implements Iterator<Map.Entry<K, List<V>>> {
 
 	private Queue<E> entryQueue;
 	private K currentKey;
 	private ObjectInputStream ois;
 
-	public SortedListToMapEntryIterator(String sortFileName) throws IOException, ClassNotFoundException {
+	public IndexEntryIterator(File sortFileName) throws IOException, ClassNotFoundException {
 
 		// open output stream for iterator
-		ois = new ObjectInputStream(new FileInputStream(sortFileName));
+		ois = new ObjectInputStream(new BufferedInputStream(new FileInputStream(sortFileName)));
 
 		entryQueue = new LinkedList<E>();
 
@@ -36,7 +38,7 @@ public class SortedListToMapEntryIterator<K, V, E extends Map.Entry<K,V>> implem
 			entry = (E) ois.readObject();
 		} catch (EOFException e) {
 		}
-		if(entry!=null) {
+		if(entry != null) {
 			currentKey = entry.getKey();
 			entryQueue.add(entry);
 		}

@@ -11,12 +11,15 @@ import java.lang.reflect.InvocationTargetException;
 import java.security.NoSuchAlgorithmException;
 import java.util.AbstractMap;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ThreadPoolExecutor;
+
+import common.io.objectstream.index.IndexMerger;
+import common.io.objectstream.index.IndexWriter;
+
 
 class HashController implements Callable<Iterator<Map.Entry<String, List<Map.Entry<String, Long>>>>> {
 
@@ -24,16 +27,13 @@ class HashController implements Callable<Iterator<Map.Entry<String, List<Map.Ent
 	private final Iterator<Map.Entry<Long, List<String>>> fileSizeIterator;
 	private final String algorithm;
 	private final int bufferSize;
-	private final String sortFileName;
-
-	// key = hash as hex string, value = file paths
-	private Map<String, List<String>> duplicates = new HashMap<String, List<String>>();
+	private final File sortFile;
 
 	public HashController(String sortFileName, String algorithm, int bufferSize, Iterator<Map.Entry<Long, List<String>>> fileSizeIterator) {
 
-		this.sortFileName=sortFileName;
-		this.bufferSize=bufferSize;
-		this.algorithm=algorithm;
+		this.sortFile = new File(sortFileName);
+		this.bufferSize = bufferSize;
+		this.algorithm = algorithm;
 		this.fileSizeIterator = fileSizeIterator;
 	}
 
@@ -41,11 +41,25 @@ class HashController implements Callable<Iterator<Map.Entry<String, List<Map.Ent
 
 		DupFileFinder.log.info("Starting hashing of files");
 
-		duplicates.clear();
-//		public HashJob(int bufferSize, String algorithm, String sortFileName, int chunkSize, Logger log) throws NoSuchAlgorithmException {
+		Comparator<Map.Entry<String, Map.Entry<String, Long>>> comparator = new Comparator<Map.Entry<String, Map.Entry<String, Long>>>() {
 
+			@Override
+			public int compare(Map.Entry<String, Map.Entry<String, Long>> o1,
+					Map.Entry<String, Map.Entry<String, Long>> o2) {
+				return o1.getKey().compareTo(o2.getKey());
+			}
+		};
+
+		IndexWriter<Map.Entry<String, Map.Entry<String, Long>>> writer = new IndexWriter<Map.Entry<String, Map.Entry<String, Long>>>(this.sortFile,"hash",comparator);
+
+		HashJob.algo = algorithm;
+		HashJob.bufferSize = bufferSize;
+		HashJob.writer = writer;
+		HashJob.log = DupFileFinder.log;
+
+		int maxTasks = ((ThreadPoolExecutor)DupFileFinder.threadpool).getMaximumPoolSize();
 		while(fileSizeIterator.hasNext()) {
-			//    size, list of filenames
+			// size, list of filenames
 			Map.Entry<Long, List<String>> entry = fileSizeIterator.next();
 			// only process entry with multiple files of the same size!
 			if (entry.getValue().size() > 1) {
@@ -54,31 +68,23 @@ class HashController implements Callable<Iterator<Map.Entry<String, List<Map.Ent
 				while(i1.hasNext()) {
 
 					Map.Entry<Long, String> fileEntry = new AbstractMap.SimpleEntry<Long,String>(entry.getKey(), i1.next());
-					HashJob j = new HashJob(this.bufferSize, this.algorithm, this.sortFileName, this.noMaxObjects, DupFileFinder.log, fileEntry);
-					DupFileFinder.threadpool.submit(j);
+					HashJob j = new HashJob(fileEntry);
+					DupFileFinder.threadpool.execute(j);
+					HashJob.waitForJobs(maxTasks);
 				}
 			}
 		}
 
 		// wait for jobs to finish
-		FileScannerJob.waitForJobs();
-
-		Comparator<Map.Entry<String, Map.Entry<String, Long>>> comparator = new Comparator<Map.Entry<String, Map.Entry<String, Long>>>() {
-
-			@Override
-			public int compare(Entry<String, Entry<String, Long>> o1,
-					Entry<String, Entry<String, Long>> o2) {
-				return o1.getKey().compareTo(o2.getKey());
-			}
-		};
+		HashJob.waitForJobs(0);
+		writer.close();
 
 		DupFileFinder.log.info("Sort file list on disk");
-		File dir = new File(System.getProperty("user.dir"));
-		SerializedMerger<Map.Entry<String, Map.Entry<String, Long>>> externalSorter = new SerializedMerger<Map.Entry<String, Map.Entry<String, Long>>>(dir, sortFileName, noMaxObjects, comparator);
-		externalSorter.mergeSortedFiles();
-		externalSorter.close(true);
-	
-		return new SortedListToMapEntryIterator<String, Map.Entry<String, Long>, Map.Entry<String, Map.Entry<String, Long>>>(sortFileName);
+		IndexMerger<Map.Entry<String, Map.Entry<String, Long>>> externalSorter = new IndexMerger<Map.Entry<String, Map.Entry<String, Long>>>(sortFile, "hash", noMaxObjects, comparator, true);
+		externalSorter.call();
+		File index = externalSorter.getIndexFile();
+
+		return new IndexEntryIterator<String, Map.Entry<String, Long>, Map.Entry<String, Map.Entry<String, Long>>>(index);
 	}
 
 }

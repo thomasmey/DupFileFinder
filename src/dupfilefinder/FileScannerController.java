@@ -13,52 +13,26 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
-import java.util.logging.Level;
+import java.util.concurrent.ThreadPoolExecutor;
+
+import common.io.objectstream.index.IndexMerger;
+import common.io.objectstream.index.IndexWriter;
+
 
 class FileScannerController implements Callable<Iterator<Map.Entry<Long, List<String>>>>{
 
 	private File startDir;
-	private String sortFileName;
-	private final int noMaxObjects = 500000;
+	private File sortFile;
+	private final int noMaxObjects = 50000;
 
 	public FileScannerController(String sortFileName, File startDir) throws Exception {
 		this.startDir = startDir;
-		this.sortFileName = sortFileName;
+		this.sortFile = new File(sortFileName);
 	}
 
 	public Iterator<Map.Entry<Long, List<String>>> call() throws InterruptedException, FileNotFoundException, IOException, ClassNotFoundException, IllegalArgumentException, SecurityException, IllegalAccessException, InvocationTargetException, NoSuchMethodException {
 		
 		DupFileFinder.log.info("Starting file scan");
-
-		int dirCount=0;
-		File[] files = startDir.listFiles();
-
-		if (files != null) {
-			for (File file : files) {
-				if (file.isDirectory()) {
-					try {
-						if(file.getCanonicalPath().equals(file.getAbsolutePath())) {
-							// submit folder as job
-							FileScannerJob j = new FileScannerJob(DupFileFinder.log, this.sortFileName, this.noMaxObjects, file);
-							DupFileFinder.threadpool.submit(j);
-							dirCount++;
-						} else
-							DupFileFinder.log.log(Level.FINE, "Skipping {0} - Symbolic link detected!", file);
-					} catch (IOException e) {
-						DupFileFinder.log.log(Level.SEVERE, "IOException", e);
-					}
-				}
-			}
-		}
-
-		// startDir didn't contain any folders, submit startDir as job
-		if(dirCount == 0) {
-			FileScannerJob j = new FileScannerJob(DupFileFinder.log, this.sortFileName, this.noMaxObjects, startDir);
-			DupFileFinder.threadpool.submit(j);
-		}
-
-		// wait for jobs to finish
-		FileScannerJob.waitForJobs();
 
 		Comparator<Map.Entry<Long, String>> comparator = new Comparator<Map.Entry<Long, String>>() {
 
@@ -69,13 +43,23 @@ class FileScannerController implements Callable<Iterator<Map.Entry<Long, List<St
 			}
 		};
 
-		DupFileFinder.log.info("Sort file list on disk");
-		File dir = new File(System.getProperty("user.dir"));
-		SerializedMerger<Map.Entry<Long, String>> externalSorter = new SerializedMerger<Map.Entry<Long, String>>(dir, sortFileName, noMaxObjects, comparator);
-		externalSorter.mergeSortedFiles();
-		externalSorter.close(true);
-	
-		return new SortedListToMapEntryIterator<Long,String,Map.Entry<Long, String>>(sortFileName);
+		IndexWriter<Map.Entry<Long, String>> writer = new IndexWriter<Map.Entry<Long, String>>(this.sortFile,"filesize",comparator);
+
+		FileScannerJob j = new FileScannerJob(DupFileFinder.log, startDir, writer);
+		j.run();
+
+		// wait for jobs to finish
+		FileScannerJob.waitForJobs();
+		writer.close();
+		long ctc = ((ThreadPoolExecutor)DupFileFinder.threadpool).getCompletedTaskCount();
+		System.err.println("ctc= " + ctc);
+
+		DupFileFinder.log.info("Sorting index. Please wait...");
+		IndexMerger<Map.Entry<Long, String>> externalSorter = new IndexMerger<Map.Entry<Long, String>>(sortFile, "filesize", noMaxObjects, comparator, true);
+		externalSorter.call();
+		File index = externalSorter.getIndexFile();
+
+		return new IndexEntryIterator<Long,String,Map.Entry<Long, String>>(index);
 	}
 
 }
