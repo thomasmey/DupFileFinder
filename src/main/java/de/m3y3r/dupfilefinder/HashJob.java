@@ -2,7 +2,7 @@
  * Copyright 2012 Thomas Meyer
  */
 
-package dupfilefinder;
+package de.m3y3r.dupfilefinder;
 
 import java.io.BufferedInputStream;
 import java.io.FileInputStream;
@@ -11,24 +11,25 @@ import java.io.InputStream;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.AbstractMap;
-import java.util.Map;
+import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import common.io.objectstream.index.IndexWriter;
+import common.io.index.avro.AvroSortingIndexWriter;
+import de.m3y3r.dupfilefinder.avro.HashStringAvro;
+import de.m3y3r.dupfilefinder.avro.SizePathAvro;
 
 public class HashJob implements Runnable {
 
-	private final Map.Entry<Long, String> fileEntry;
+	private final SizePathAvro fileEntry;
 
 	private static AtomicInteger jobCount = new AtomicInteger(0);
 
 	static Logger log;
 	static String algo;
 	static int bufferSize;
-	static IndexWriter<Map.Entry<String, Map.Entry<String, Long>>> writer;
+	static AvroSortingIndexWriter<HashStringAvro> writer;
 
 	private static ThreadLocal<MessageDigest> messageDigest = new ThreadLocal<MessageDigest>() {
 		protected MessageDigest initialValue() {
@@ -47,7 +48,7 @@ public class HashJob implements Runnable {
 		}
 	};
 
-	public HashJob(Map.Entry<Long, String> fileEntry) throws NoSuchAlgorithmException {
+	public HashJob(SizePathAvro fileEntry) throws NoSuchAlgorithmException {
 		this.fileEntry = fileEntry;
 
 		jobCount.incrementAndGet();
@@ -56,16 +57,19 @@ public class HashJob implements Runnable {
 	public void run() {
 
 		String hashString;
-		if(fileEntry.getKey() > 0)
-			hashString = calculateHash(fileEntry.getValue());
+		if(fileEntry.getFileSize() > 0)
+			hashString = calculateHash(fileEntry.getFilePath());
 		else
 			hashString = "00";
 
-		Map.Entry<String, Map.Entry<String, Long>> he = new AbstractMap.SimpleEntry<String, Map.Entry<String, Long>> (hashString,
-				new AbstractMap.SimpleEntry<String, Long>(fileEntry.getValue(),fileEntry.getKey()));
-
+		// HashString -> (FileName, FileSize)
+		HashStringAvro he = new HashStringAvro(hashString, fileEntry.getFilePath(), fileEntry.getFileSize());
 		synchronized (writer) {
-			writer.write(he);
+			try {
+				writer.writeObject(he);
+			} catch (IOException e) {
+				log.log(Level.SEVERE, "Error!", e);
+			}
 		}
 
 		synchronized (jobCount) {
@@ -83,39 +87,32 @@ public class HashJob implements Runnable {
 		}
 	}
 
-	private String calculateHash(String filePath){
+	private String calculateHash(CharSequence filePath){
+
+		log.log(Level.FINE, "Hashing file: {0}", filePath);
+		DigestInputStream digestInputStream = null;
 
 		try {
-			byte[] digestBuffer = (byte[]) buffer.get();
-
-			InputStream inputStream = new BufferedInputStream(new FileInputStream(filePath));
+			InputStream inputStream = new BufferedInputStream(new FileInputStream(filePath.toString()));
 			MessageDigest md = messageDigest.get();
 			md.reset();
-			DigestInputStream digestInputStream = new DigestInputStream(inputStream, md);
+			digestInputStream = new DigestInputStream(inputStream, md);
+
+			byte[] digestBuffer = (byte[]) buffer.get();
 
 			while(digestInputStream.read(digestBuffer) >= 0);
-			digestInputStream.close();
 			byte[] digest = digestInputStream.getMessageDigest().digest();
 
-			return hashToHex(digest);
+			return Arrays.toString(digest);
 
 		} catch(IOException e) {
-			DupFileFinder.log.log(Level.SEVERE, "Could not read from file: {0}", filePath);
+			log.log(Level.SEVERE, "Could not read from file: {0}", filePath);
+			return "IOException";
+		} finally {
+			try {
+				if(digestInputStream != null)
+					digestInputStream.close();
+			} catch(IOException e) {}
 		}
-		return null;
-	}
-
-	private String hashToHex(byte[] hash) {
-		StringBuilder hexString = new StringBuilder();
-		String hex;
-		for (byte byt : hash) {
-			hex = Integer.toHexString(0xFF & byt);
-			// toHexString drops leading zeros, add them again
-			if (hex.length() == 1)
-				hexString.append(0);
-			hexString.append(hex);
-		}
-
-		return hexString.toString();
 	}
 }

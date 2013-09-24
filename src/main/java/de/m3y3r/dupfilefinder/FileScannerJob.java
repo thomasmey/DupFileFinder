@@ -2,32 +2,30 @@
  * Copyright 2012 Thomas Meyer
  */
 
-package dupfilefinder;
+package de.m3y3r.dupfilefinder;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.AbstractMap;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import common.io.objectstream.index.IndexWriter;
+import common.io.index.avro.AvroSortingIndexWriter;
+
+import de.m3y3r.dupfilefinder.avro.SizePathAvro;
 
 public class FileScannerJob implements Runnable {
 
 	private final File folder;
-	private final IndexWriter<Map.Entry<Long, String>> writer;
+	private final AvroSortingIndexWriter<SizePathAvro> indexWriter;
+	private final Logger log;
 
-	private static Logger log;
 	private static AtomicInteger jobCount = new AtomicInteger();
 
-	public FileScannerJob (Logger log, File folder, IndexWriter<Map.Entry<Long, String>> writer) {
-		FileScannerJob.log = log;
-
-		this.writer = writer;
-		this.folder = folder;
-
+	public FileScannerJob (Logger log, File folderToScan, AvroSortingIndexWriter<SizePathAvro> indexWriter) {
+		this.log = log;
+		this.folder = folderToScan;
+		this.indexWriter = indexWriter;
 		jobCount.incrementAndGet();
 	}
 
@@ -40,7 +38,7 @@ public class FileScannerJob implements Runnable {
 				if (file.isDirectory()) {
 					try {
 						if(file.getCanonicalPath().equals(file.getAbsolutePath())) {
-							FileScannerJob j = new FileScannerJob(FileScannerJob.log, file, writer);
+							FileScannerJob j = new FileScannerJob(log, file, indexWriter);
 							DupFileFinder.threadpool.execute(j);
 						} else
 							DupFileFinder.log.log(Level.FINE, "Skipping {0} - Symbolic link detected!", file);
@@ -48,9 +46,13 @@ public class FileScannerJob implements Runnable {
 						log.log(Level.SEVERE, "Exception", e);
 					}
 				} else {
-					Map.Entry<Long, String> entry = new AbstractMap.SimpleEntry<Long, String>(file.length(), file.getAbsolutePath());
-					synchronized (writer) {
-						writer.write(entry);
+					SizePathAvro entry = new SizePathAvro(file.length(), file.getAbsolutePath());
+					synchronized (indexWriter) {
+						try {
+							indexWriter.writeObject(entry);
+						} catch (IOException e) {
+							log.log(Level.SEVERE, "Exception", e);
+						}
 					}
 				}
 			}

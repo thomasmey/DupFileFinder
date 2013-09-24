@@ -1,0 +1,10 @@
+{
+	"type": "record",
+	"name": "de.m3y3r.dupfilefinder.avro.HashStringAvro",
+	"doc": "hashstring to (file path, file size) index entry",
+	"fields": [
+		{"name": "hashString", "type": "string"},
+		{"name": "filePath", "type": "string"},
+		{"name": "fileSize", "type": "long"}
+	]
+}
