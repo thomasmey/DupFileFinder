@@ -56,6 +56,7 @@ public class IndexEntryIterator<I extends SpecificRecord> implements Iterator<Li
 				return currentValueList;
 			}
 			entryQueue.remove();
+			currentValueList.add(entry);
 
 			// put next object on list
 			I fe = null;
@@ -68,7 +69,6 @@ public class IndexEntryIterator<I extends SpecificRecord> implements Iterator<Li
 			if(fe != null)
 				entryQueue.add(fe);
 
-			currentValueList.add(fe);
 			entry = entryQueue.peek();
 		}
 

@@ -41,7 +41,7 @@ public class FileScannerJob implements Runnable {
 							FileScannerJob j = new FileScannerJob(log, file, indexWriter);
 							DupFileFinder.threadpool.execute(j);
 						} else
-							DupFileFinder.log.log(Level.FINE, "Skipping {0} - Symbolic link detected!", file);
+							log.log(Level.FINE, "Skipping {0} - Symbolic link detected!", file);
 					} catch (IOException e) {
 						log.log(Level.SEVERE, "Exception", e);
 					}

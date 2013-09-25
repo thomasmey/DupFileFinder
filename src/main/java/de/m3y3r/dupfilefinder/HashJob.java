@@ -4,7 +4,6 @@
 
 package de.m3y3r.dupfilefinder;
 
-import java.io.BufferedInputStream;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -12,7 +11,6 @@ import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -24,7 +22,7 @@ public class HashJob implements Runnable {
 
 	private final SizePathAvro fileEntry;
 
-	private static AtomicInteger jobCount = new AtomicInteger(0);
+	private static int jobCount;
 
 	static Logger log;
 	static String algo;
@@ -48,10 +46,12 @@ public class HashJob implements Runnable {
 		}
 	};
 
-	public HashJob(SizePathAvro fileEntry) throws NoSuchAlgorithmException {
+	public HashJob(SizePathAvro fileEntry) {
 		this.fileEntry = fileEntry;
 
-		jobCount.incrementAndGet();
+		synchronized (HashJob.class) {
+			jobCount += 1;
+		}
 	}
 
 	public void run() {
@@ -72,18 +72,16 @@ public class HashJob implements Runnable {
 			}
 		}
 
-		synchronized (jobCount) {
-			jobCount.decrementAndGet();
-			jobCount.notifyAll();
+		synchronized (HashJob.class) {
+			jobCount -= 1;
+			HashJob.class.notifyAll();
 		}
 	}
 
-	public static void waitForJobs(int count) {
-		synchronized (jobCount) {
-			while(jobCount.get() > count)
-				try {
-					jobCount.wait();
-				} catch (InterruptedException e) {}
+	public static void waitForJobs(int count) throws InterruptedException {
+		synchronized (HashJob.class) {
+			while(jobCount > count)
+				HashJob.class.wait();
 		}
 	}
 
@@ -93,7 +91,7 @@ public class HashJob implements Runnable {
 		DigestInputStream digestInputStream = null;
 
 		try {
-			InputStream inputStream = new BufferedInputStream(new FileInputStream(filePath.toString()));
+			InputStream inputStream = new FileInputStream(filePath.toString());
 			MessageDigest md = messageDigest.get();
 			md.reset();
 			digestInputStream = new DigestInputStream(inputStream, md);
