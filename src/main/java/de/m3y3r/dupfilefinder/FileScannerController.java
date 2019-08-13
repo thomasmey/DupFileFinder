@@ -10,55 +10,56 @@ import java.util.Comparator;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import org.apache.avro.Schema;
-
-import common.io.index.avro.AvroIndexMerger;
-import common.io.index.avro.AvroSortingIndexWriter;
-import de.m3y3r.dupfilefinder.avro.SizePathAvro;
+import common.io.index.IndexReader;
+import common.io.index.IndexWriter;
+import common.io.index.IndexWriterFactory;
+import common.io.index.impl.IndexMerger;
+import common.io.index.impl.SortingIndexWriter;
+import de.m3y3r.dupfilefinder.model.SizePath;
 
 class FileScannerController implements Runnable {
 
 	private File startDir;
 	private File sortFile;
-	private int maxObjects = 100000;
-	private Logger log;
+	private int maxObjects = 100_000;
+	private static Logger log = Logger.getLogger(FileScannerController.class.getName());
 
-	static Comparator<SizePathAvro> comparator = new Comparator<SizePathAvro>() {
+	public static Comparator<SizePath> comparator = Comparator.comparingLong(SizePath::getFileSize);
 
-		public int compare(SizePathAvro o1, SizePathAvro o2) {
-			return o2.getFileSize().compareTo(o1.getFileSize());
-		}
-
-	};
-
-	public FileScannerController(Logger log, String sortFileName, File startDir) {
+	public FileScannerController(String sortFileName, File startDir) {
 		this.startDir = startDir;
 		this.sortFile = new File(sortFileName);
-		this.log = log;
 	}
 
 	public void run() {
 
 		log.info("Starting file scan");
-		Schema schema = SizePathAvro.getClassSchema();
 		String indexName = "fileSize";
 
-		AvroSortingIndexWriter<SizePathAvro> indexWriter;
+		SortingIndexWriter<SizePath> indexWriter;
 		try {
-			indexWriter = new AvroSortingIndexWriter<SizePathAvro>(schema, sortFile, indexName, maxObjects, comparator);
+			IndexWriterFactory<SizePath> indexWriterFactory = i -> {
+				try {
+					return new JavaSerialIndexWriter<SizePath>(new File(indexName + '.' + i));
+				} catch (IOException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+				return null;
+			};
+			indexWriter = new SortingIndexWriter<SizePath>(indexWriterFactory, maxObjects, comparator);
 		} catch (IOException e) {
 			log.log(Level.SEVERE, "Error!", e);
 			return;
 		}
 
-		FileScannerJob j = new FileScannerJob(log, startDir, indexWriter);
+		FileScannerJob j = new FileScannerJob(startDir, indexWriter);
 		j.run();
 
 		// wait for jobs to finish
 		FileScannerJob.waitForJobs();
 
 		try {
-			indexWriter.flush();
 			indexWriter.close();
 		} catch(IOException e) {
 			log.log(Level.SEVERE, "Error!", e);
@@ -66,12 +67,9 @@ class FileScannerController implements Runnable {
 		}
 
 		log.info("Sorting index. Please wait...");
-		try {
-			AvroIndexMerger<SizePathAvro> externalSorter = new AvroIndexMerger<SizePathAvro>(SizePathAvro.class, sortFile, indexName, maxObjects, comparator, true);
-			externalSorter.run();
-		} catch (IOException e) {
-			log.log(Level.SEVERE, "Error!", e);
-		}
+		IndexReader<SizePath>[] indexReaders = null;
+		IndexWriter<SizePath> indexWrt = null;
+		IndexMerger<SizePath> externalSorter = new IndexMerger<SizePath>(maxObjects, comparator, indexReaders, indexWrt);
+		externalSorter.run();
 	}
-
 }

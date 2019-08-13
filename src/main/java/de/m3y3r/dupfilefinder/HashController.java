@@ -13,34 +13,28 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import common.io.index.AbstractIndexMerger;
-import common.io.index.avro.AvroIndexMerger;
-import common.io.index.avro.AvroSortingIndexWriter;
-import de.m3y3r.dupfilefinder.avro.HashStringAvro;
-import de.m3y3r.dupfilefinder.avro.SizePathAvro;
+import common.io.index.IndexReader;
+import common.io.index.IndexWriter;
+import common.io.index.IndexWriterFactory;
+import common.io.index.impl.IndexMerger;
+import common.io.index.impl.SortingIndexWriter;
+import de.m3y3r.dupfilefinder.model.HashString;
+import de.m3y3r.dupfilefinder.model.SizePath;
 
 class HashController implements Runnable {
 
+	private static final Logger log = Logger.getLogger(HashController.class.getName());
+
 	private final int noMaxObjects = 100000;
-	private final Iterator<List<SizePathAvro>> fileSizeIterator;
-	private final String algorithm;
-	private final int bufferSize;
-	private final File sortFile;
-	private final Logger log;
+	private final Iterator<List<SizePath>> fileSizeIterator;
 
-	static Comparator<HashStringAvro> comparator = new Comparator<HashStringAvro>() {
-
-		public int compare(HashStringAvro o1, HashStringAvro o2) {
+	static Comparator<HashString> comparator = new Comparator<HashString>() {
+		public int compare(HashString o1, HashString o2) {
 			return o1.getHashString().toString().compareTo(o2.getHashString().toString());
 		}
 	};
 
-	public HashController(Logger log, String sortFileName, String algorithm, int bufferSize, Iterator<List<SizePathAvro>> fileSizeIterator) {
-
-		this.log = log;
-		this.sortFile = new File(sortFileName);
-		this.bufferSize = bufferSize;
-		this.algorithm = algorithm;
+	public HashController(String algorithm, Iterator<List<SizePath>> fileSizeIterator) {
 		this.fileSizeIterator = fileSizeIterator;
 	}
 
@@ -49,28 +43,36 @@ class HashController implements Runnable {
 		log.info("Starting hashing of files");
 
 		String indexName = "hash";
-		AvroSortingIndexWriter<HashStringAvro> writer;
+		SortingIndexWriter<HashString> writer;
 		try {
-			writer = new AvroSortingIndexWriter<HashStringAvro>(HashStringAvro.getClassSchema(), sortFile, indexName, noMaxObjects, comparator);
+			IndexWriterFactory<HashString> indexWriterFactory = i -> {
+				try {
+					return new JavaSerialIndexWriter<>(new File(indexName + '.' + i + ".part"));
+				} catch (IOException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+				return null;
+			};
+			writer = new SortingIndexWriter<HashString>(indexWriterFactory, noMaxObjects, comparator);
 		} catch (IOException e) {
 			log.log(Level.SEVERE, "Error!", e);
 			return;
 		}
 
-		//FIXME:
-		HashJob.algo = algorithm;
-		HashJob.bufferSize = bufferSize;
-		HashJob.writer = writer;
-		HashJob.log = log;
+//		//FIXME:
+//		HashJob.algo = algorithm;
+//		HashJob.bufferSize = bufferSize;
+//		HashJob.writer = writer;
 
 		int maxTasks = ((ThreadPoolExecutor)DupFileFinder.threadpool).getMaximumPoolSize();
 		try {
 			while(fileSizeIterator.hasNext()) {
 				// size, list of filenames
-				List<SizePathAvro> entries = fileSizeIterator.next();
+				List<SizePath> entries = fileSizeIterator.next();
 				// only process entry with multiple files of the same size!
 				if (entries.size() > 1) {
-					for(SizePathAvro fileEntry: entries) {
+					for(SizePath fileEntry: entries) {
 						HashJob j = new HashJob(fileEntry);
 						DupFileFinder.threadpool.execute(j);
 						HashJob.waitForJobs(maxTasks + 1);
@@ -89,13 +91,26 @@ class HashController implements Runnable {
 		}
 
 		log.info("Sort hash index on disk");
-		try {
-			AbstractIndexMerger<HashStringAvro> externalSorter = new AvroIndexMerger<HashStringAvro>(HashStringAvro.class, sortFile, indexName, noMaxObjects, comparator, true);
-			externalSorter.run();
-		} catch (IOException e) {
-			log.log(Level.SEVERE, "Error!", e);
-			return;
+		File[] indexParts = new File(".").listFiles(f -> f.getName().endsWith(".part"));
+		IndexReader<HashString>[] indexReaders = new IndexReader[indexParts.length];
+		for(int i = 0, n = indexParts.length; i < n; i++) {
+			try {
+				indexReaders[i] = new JavaSerialIndexReader<HashString>(indexParts[i]);
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
 		}
+
+		IndexWriter<HashString> indexWriter = null;
+		try {
+			indexWriter = new JavaSerialIndexWriter<>(new File(indexName + ".index"));
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		IndexMerger<HashString> externalSorter = new IndexMerger<HashString>(noMaxObjects, comparator, indexReaders, indexWriter);
+		externalSorter.run();
 	}
 
 }

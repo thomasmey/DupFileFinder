@@ -4,7 +4,6 @@
 
 package de.m3y3r.dupfilefinder;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -13,21 +12,19 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
 
-import org.apache.avro.specific.SpecificRecord;
+import common.io.index.IndexReader;
 
-import common.io.index.avro.AvroIndexReader;
-
-public class IndexEntryIterator<I extends SpecificRecord> implements Iterator<List<I>> {
+public class IndexEntryIterator<I> implements Iterator<List<I>> {
 
 	private final Queue<I> entryQueue;
-	private final AvroIndexReader<I> indexReader;
+	private final IndexReader<I> indexReader;
 	private final Comparator<I> comparator;
 	private I currentKey;
 
-	public IndexEntryIterator(File sortFileName, Class<I> clazzIn, Comparator<I> comparator) throws IOException, ClassNotFoundException {
+	public IndexEntryIterator(IndexReader<I> indexReader, Comparator<I> comparator) throws IOException, ClassNotFoundException {
 
 		// open output stream for iterator
-		this.indexReader = new AvroIndexReader<I>(clazzIn, sortFileName);
+		this.indexReader = indexReader;
 		this.entryQueue = new LinkedList<I>();
 
 		I entry = indexReader.readObject();

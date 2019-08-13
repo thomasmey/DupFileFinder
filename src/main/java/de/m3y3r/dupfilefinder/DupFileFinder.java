@@ -16,12 +16,13 @@ import java.util.concurrent.Executors;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import de.m3y3r.dupfilefinder.avro.HashStringAvro;
-import de.m3y3r.dupfilefinder.avro.SizePathAvro;
+import common.io.index.IndexReader;
+import de.m3y3r.dupfilefinder.model.HashString;
+import de.m3y3r.dupfilefinder.model.SizePath;
 
 class DupFileFinder implements Runnable {
 
-	private static Logger log;
+	private static Logger log = Logger.getLogger(DupFileFinder.class.getName());
 	static ExecutorService threadpool;
 	private String args[];
 
@@ -30,8 +31,6 @@ class DupFileFinder implements Runnable {
 	}
 
 	public static void main(String[] args) {
-
-		log = Logger.getLogger("mainLog");
 		new DupFileFinder(args).run();
 	}
 
@@ -95,31 +94,31 @@ class DupFileFinder implements Runnable {
 
 		log.info("Build hash index.");
 		File index = new File(indexPrefix + ".fileSize.index");
-		Iterator<List<SizePathAvro>> fileSizeIterator = new IndexEntryIterator<SizePathAvro>(index, SizePathAvro.class, FileScannerController.comparator);
-		HashController checker = new HashController(log, indexPrefix, "SHA-1", 6 * 1024 * 1024, fileSizeIterator);
+		IndexReader<SizePath> indexReader = new JavaSerialIndexReader<SizePath>(index);
+		Iterator<List<SizePath>> fileSizeIterator = new IndexEntryIterator<SizePath>(indexReader, FileScannerController.comparator);
+		HashController checker = new HashController("SHA-1", fileSizeIterator);
 		checker.run();
 	}
 
 	private void buildFileSizeIndex(File startDir, String indexPrefix) {
 		log.info("Build file size index.");
-
-		FileScannerController fsc = new FileScannerController(log, indexPrefix, startDir);
+		FileScannerController fsc = new FileScannerController(indexPrefix, startDir);
 		fsc.run();
 	}
 
 	private void printFileSizeIndex(String indexFileName) throws ClassNotFoundException, IOException {
-
 		log.info("Only printing file list");
 		File index = new File(indexFileName + ".fileSize.index");
-		Iterator<List<SizePathAvro>> fileSizeIterator = new IndexEntryIterator<SizePathAvro>(index, SizePathAvro.class, FileScannerController.comparator);
+		IndexReader<SizePath> indexReader = new JavaSerialIndexReader<SizePath>(index);
+		Iterator<List<SizePath>> fileSizeIterator = new IndexEntryIterator<SizePath>(indexReader, FileScannerController.comparator);
 
 		PrintWriter out = new PrintWriter("filesize-list.txt");
 		while(fileSizeIterator.hasNext()) {
-			List<SizePathAvro> ent = fileSizeIterator.next();
+			List<SizePath> ent = fileSizeIterator.next();
 			if(ent.size() > 1) {
 				out.print("Files with size: ");
 				out.println(ent.get(0).getFileSize());
-				for(SizePathAvro e: ent) {
+				for(SizePath e: ent) {
 					out.print("\t");
 					out.println(e.getFilePath());
 				}
@@ -132,9 +131,10 @@ class DupFileFinder implements Runnable {
 
 		log.info("Deduplicate files with hardlinks");
 		File index = new File(indexPrefix + ".hash.index");
-		Iterator<List<HashStringAvro>> dupIter = new IndexEntryIterator<HashStringAvro>(index, HashStringAvro.class, HashController.comparator);
+		IndexReader<HashString> indexReader = new JavaSerialIndexReader<HashString>(index);
+		Iterator<List<HashString>> dupIter = new IndexEntryIterator<HashString>(indexReader, HashController.comparator);
 		while(dupIter.hasNext()) {
-			List<HashStringAvro> entries = dupIter.next();
+			List<HashString> entries = dupIter.next();
 			int n = entries.size();
 			if(n <= 1)
 				continue;
@@ -143,7 +143,7 @@ class DupFileFinder implements Runnable {
 			File firstFile = null;
 			boolean allEndingsAreOkay = true;
 			for(int i = 0; i < n; i++) {
-				HashStringAvro entry = entries.get(i);
+				HashString entry = entries.get(i);
 				String path = entry.getFilePath().toString();
 				if(!path.endsWith(fileNameSuffix)) {
 					allEndingsAreOkay = false;
@@ -160,7 +160,7 @@ class DupFileFinder implements Runnable {
 			assert firstFile != null;
 			Path existing = firstFile.toPath();
 			for(int i = 1; i < n; i++) {
-				HashStringAvro entry = entries.get(i);
+				HashString entry = entries.get(i);
 				String path = entry.getFilePath().toString();
 				File link = new File(path);
 				link.delete();
@@ -174,17 +174,18 @@ class DupFileFinder implements Runnable {
 		log.info("Print duplicate files");
 		long dupBytes = 0;
 		File index = new File(indexPrefix + ".hash.index");
-		Iterator<List<HashStringAvro>> dupIter = new IndexEntryIterator<HashStringAvro>(index, HashStringAvro.class, HashController.comparator);
+		IndexReader<HashString> indexReader = new JavaSerialIndexReader<HashString>(index);
+		Iterator<List<HashString>> dupIter = new IndexEntryIterator<HashString>(indexReader, HashController.comparator);
 
 		PrintWriter out = new PrintWriter("duplicates-hash.txt");
 		while(dupIter.hasNext()) {
-			List<HashStringAvro> entries = dupIter.next();
+			List<HashString> entries = dupIter.next();
 			if(entries.size() > 1) {
 				dupBytes = dupBytes + (entries.size() - 1) * entries.get(0).getFileSize();
 				out.print("Duplicate files found for hash: ");
 				out.print(entries.get(0).getHashString());
 				out.println(" - size: " + entries.get(0).getFileSize());
-				for(HashStringAvro entry: entries) {
+				for(HashString entry: entries) {
 					out.print("\t");
 					out.println(entry.getFilePath());
 				}
@@ -193,5 +194,4 @@ class DupFileFinder implements Runnable {
 		out.println("Duplicates in bytes: " + dupBytes);
 		out.close();
 	}
-
 }

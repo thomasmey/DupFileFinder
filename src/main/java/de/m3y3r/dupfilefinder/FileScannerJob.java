@@ -10,20 +10,19 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import common.io.index.avro.AvroSortingIndexWriter;
-
-import de.m3y3r.dupfilefinder.avro.SizePathAvro;
+import common.io.index.impl.SortingIndexWriter;
+import de.m3y3r.dupfilefinder.model.SizePath;
 
 public class FileScannerJob implements Runnable {
 
+	private final static Logger log = Logger.getLogger(FileScannerJob.class.getName());
+
 	private final File folder;
-	private final AvroSortingIndexWriter<SizePathAvro> indexWriter;
-	private final Logger log;
+	private final SortingIndexWriter<SizePath> indexWriter;
 
 	private static AtomicInteger jobCount = new AtomicInteger();
 
-	public FileScannerJob (Logger log, File folderToScan, AvroSortingIndexWriter<SizePathAvro> indexWriter) {
-		this.log = log;
+	public FileScannerJob (File folderToScan, SortingIndexWriter<SizePath> indexWriter) {
 		this.folder = folderToScan;
 		this.indexWriter = indexWriter;
 		jobCount.incrementAndGet();
@@ -38,7 +37,7 @@ public class FileScannerJob implements Runnable {
 				if (file.isDirectory()) {
 					try {
 						if(file.getCanonicalPath().equals(file.getAbsolutePath())) {
-							FileScannerJob j = new FileScannerJob(log, file, indexWriter);
+							FileScannerJob j = new FileScannerJob(file, indexWriter);
 							DupFileFinder.threadpool.execute(j);
 						} else
 							log.log(Level.FINE, "Skipping {0} - Symbolic link detected!", file);
@@ -46,7 +45,7 @@ public class FileScannerJob implements Runnable {
 						log.log(Level.SEVERE, "Exception", e);
 					}
 				} else {
-					SizePathAvro entry = new SizePathAvro(file.length(), file.getAbsolutePath());
+					SizePath entry = new SizePath(file.length(), file.getAbsolutePath());
 					synchronized (indexWriter) {
 						try {
 							indexWriter.writeObject(entry);

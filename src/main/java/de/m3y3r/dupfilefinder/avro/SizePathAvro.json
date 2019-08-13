@@ -1,9 +1,0 @@
-{
-	"type": "record",
-	"name": "de.m3y3r.dupfilefinder.avro.SizePathAvro",
-	"doc": "file size/path index entry",
-	"fields": [
-		{"name": "fileSize", "type": "long"},
-		{"name": "filePath", "type": "string"}
-	]
-}
