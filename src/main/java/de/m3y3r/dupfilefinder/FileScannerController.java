@@ -23,7 +23,7 @@ class FileScannerController implements Runnable {
 	private int maxObjects = 100_000;
 	private static Logger log = Logger.getLogger(FileScannerController.class.getName());
 
-	public static Comparator<SizePath> comparator = Comparator.comparingLong(SizePath::getFileSize);
+	public static Comparator<SizePath> comparator = Comparator.comparingLong(SizePath::getFileSize).reversed();
 
 	public FileScannerController(File startDir) {
 		this.startDir = startDir;
@@ -65,7 +65,7 @@ class FileScannerController implements Runnable {
 		}
 
 		log.info("Sorting index. Please wait...");
-		File[] indexParts = new File(".").listFiles(f -> f.getName().endsWith(".part"));
+		File[] indexParts = new File(".").listFiles(f -> f.getName().startsWith(indexName) && f.getName().endsWith(".part"));
 		IndexReader<SizePath>[] indexReaders = new IndexReader[indexParts.length];
 		for(int i = 0, n = indexParts.length; i < n; i++) {
 			try {

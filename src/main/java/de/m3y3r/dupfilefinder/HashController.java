@@ -89,7 +89,7 @@ class HashController implements Runnable {
 		}
 
 		log.info("Sort hash index on disk");
-		File[] indexParts = new File(".").listFiles(f -> f.getName().endsWith(".part"));
+		File[] indexParts = new File(".").listFiles(f -> f.getName().startsWith(indexName) && f.getName().endsWith(".part"));
 		IndexReader<HashString>[] indexReaders = new IndexReader[indexParts.length];
 		for(int i = 0, n = indexParts.length; i < n; i++) {
 			try {

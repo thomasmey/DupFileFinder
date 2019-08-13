@@ -2,6 +2,7 @@
 package de.m3y3r.dupfilefinder;
 
 import java.io.Closeable;
+import java.io.EOFException;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -21,6 +22,8 @@ public class JavaSerialIndexReader<T> implements IndexReader<T>, Closeable {
 	public T readObject() throws IOException {
 		try {
 			return (T) ois.readObject();
+		} catch(EOFException e) {
+			return null;
 		} catch (ClassNotFoundException e) {
 			e.printStackTrace();
 		}
