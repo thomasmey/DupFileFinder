@@ -17,6 +17,7 @@ import java.util.Arrays;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import common.io.index.impl.SortingIndexWriter;
 import de.m3y3r.dupfilefinder.model.HashString;
 import de.m3y3r.dupfilefinder.model.SizePath;
 
@@ -24,12 +25,8 @@ public class HashJob implements Runnable {
 
 	private final SizePath fileEntry;
 
-	private static int jobCount;
-
 	private final static Logger log = Logger.getLogger(HashJob.class.getName());
 	private final static String algo = "SHA-1";
-
-//	static AvroSortingIndexWriter<HashStringAvro> writer;
 
 	private static ThreadLocal<MessageDigest> messageDigest = new ThreadLocal<MessageDigest>() {
 		protected MessageDigest initialValue() {
@@ -42,52 +39,44 @@ public class HashJob implements Runnable {
 		}
 	};
 
-	public HashJob(SizePath fileEntry) {
-		this.fileEntry = fileEntry;
+	private SortingIndexWriter<HashString> writer;
 
-		synchronized (HashJob.class) {
-			jobCount += 1;
-		}
+	public HashJob(SizePath fileEntry, SortingIndexWriter<HashString> writer) {
+		this.fileEntry = fileEntry;
+		this.writer = writer;
+		HashController.incJobCount();
 	}
 
 	public void run() {
-
-		log.info("start");
-		String hashString;
-		if(fileEntry.getFileSize() > 0) {
-			hashString = calculateHash(Paths.get(fileEntry.getFilePath().toString()));
-		} else {
-			hashString = "00";
-		}
-		log.info("end");
-
-		if(hashString == null) {
-			System.out.println("error!");
-			return;
-		}
-		System.out.println("hash: " + hashString);
-
-		// HashString -> (FileName, FileSize)
-		HashString he = new HashString(hashString, fileEntry.getFilePath(), fileEntry.getFileSize());
-//		synchronized (writer) {
-//			try {
-//				writer.writeObject(he);
-//			} catch (IOException e) {
-//				log.log(Level.SEVERE, "Error!", e);
-//			}
-//		}
-
-		synchronized (HashJob.class) {
-			jobCount -= 1;
-			HashJob.class.notifyAll();
-		}
-	}
-
-	public static void waitForJobs(int count) throws InterruptedException {
-		synchronized (HashJob.class) {
-			while(jobCount > count) {
-				HashJob.class.wait();
+		try {
+			String hashString = null;
+			if(fileEntry.getFileSize() > 0) {
+				Path fp = Paths.get(fileEntry.getFilePath());
+				if(fp.toFile().exists() && fp.toFile().length() == fileEntry.getFileSize()) {
+					hashString = calculateHash(Paths.get(fileEntry.getFilePath()));
+				} else {
+					log.log(Level.SEVERE, "File was removed or size did change {0}", fp);
+					return;
+				}
+			} else {
+				hashString = "00";
 			}
+
+			if(hashString == null) {
+				throw new IllegalArgumentException();
+			}
+
+			// HashString -> (FileName, FileSize)
+			HashString he = new HashString(hashString, fileEntry.getFilePath(), fileEntry.getFileSize());
+			synchronized (writer) {
+				try {
+					writer.writeObject(he);
+				} catch (IOException e) {
+					log.log(Level.SEVERE, "Error!", e);
+				}
+			}
+		} finally {
+			HashController.decJobCount();
 		}
 	}
 

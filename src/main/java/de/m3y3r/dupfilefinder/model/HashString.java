@@ -1,22 +1,26 @@
-package de.m3y3r.dupfilefinder.model;  
+package de.m3y3r.dupfilefinder.model;
 
-public class HashString {
-	private final java.lang.CharSequence hashString;
-	private final java.lang.CharSequence filePath;
+import java.io.Serializable;
+
+public class HashString implements Serializable {
+
+	private static final long serialVersionUID = 1L;
+
+	private final String hashString;
+	private final String filePath;
 	private final long fileSize;
 
-	public HashString(CharSequence hashString, CharSequence filePath, long fileSize) {
-		super();
+	public HashString(String hashString, String filePath, long fileSize) {
 		this.hashString = hashString;
 		this.filePath = filePath;
 		this.fileSize = fileSize;
 	}
 
-	public java.lang.CharSequence getHashString() {
+	public String getHashString() {
 		return hashString;
 	}
 
-	public java.lang.CharSequence getFilePath() {
+	public String getFilePath() {
 		return filePath;
 	}
 

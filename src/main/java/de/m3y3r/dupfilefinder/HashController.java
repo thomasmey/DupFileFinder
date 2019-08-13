@@ -28,6 +28,8 @@ class HashController implements Runnable {
 	private final int noMaxObjects = 100000;
 	private final Iterator<List<SizePath>> fileSizeIterator;
 
+	private static int jobCount;
+
 	static Comparator<HashString> comparator = new Comparator<HashString>() {
 		public int compare(HashString o1, HashString o2) {
 			return o1.getHashString().toString().compareTo(o2.getHashString().toString());
@@ -60,11 +62,6 @@ class HashController implements Runnable {
 			return;
 		}
 
-//		//FIXME:
-//		HashJob.algo = algorithm;
-//		HashJob.bufferSize = bufferSize;
-//		HashJob.writer = writer;
-
 		int maxTasks = ((ThreadPoolExecutor)DupFileFinder.threadpool).getMaximumPoolSize();
 		try {
 			while(fileSizeIterator.hasNext()) {
@@ -72,15 +69,16 @@ class HashController implements Runnable {
 				List<SizePath> entries = fileSizeIterator.next();
 				// only process entry with multiple files of the same size!
 				if (entries.size() > 1) {
+					log.log(Level.INFO, "Processing {0} files each of size {1}", new Object[] {entries.size(), entries.get(0).getFileSize()});
 					for(SizePath fileEntry: entries) {
-						HashJob j = new HashJob(fileEntry);
+						HashJob j = new HashJob(fileEntry, writer);
 						DupFileFinder.threadpool.execute(j);
-						HashJob.waitForJobs(maxTasks + 1);
+						waitForJobs(maxTasks + 1);
 					}
 				}
 			}
 			// wait for jobs to finish
-			HashJob.waitForJobs(0);
+			waitForJobs(0);
 			writer.close();
 		} catch (InterruptedException e) {
 			log.log(Level.SEVERE, "Interrupted!", e);
@@ -111,6 +109,27 @@ class HashController implements Runnable {
 		}
 		IndexMerger<HashString> externalSorter = new IndexMerger<HashString>(noMaxObjects, comparator, indexReaders, indexWriter);
 		externalSorter.run();
+	}
+
+	public static void waitForJobs(int count) throws InterruptedException {
+		synchronized (HashJob.class) {
+			while(jobCount > count) {
+				HashJob.class.wait();
+			}
+		}
+	}
+
+	public static void decJobCount() {
+		synchronized (HashJob.class) {
+			jobCount -= 1;
+			HashJob.class.notifyAll();
+		}
+	}
+
+	public static void incJobCount() {
+		synchronized (HashJob.class) {
+			jobCount += 1;
+		}
 	}
 
 }

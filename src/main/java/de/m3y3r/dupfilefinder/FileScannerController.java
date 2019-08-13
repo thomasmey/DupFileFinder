@@ -20,15 +20,13 @@ import de.m3y3r.dupfilefinder.model.SizePath;
 class FileScannerController implements Runnable {
 
 	private File startDir;
-	private File sortFile;
 	private int maxObjects = 100_000;
 	private static Logger log = Logger.getLogger(FileScannerController.class.getName());
 
 	public static Comparator<SizePath> comparator = Comparator.comparingLong(SizePath::getFileSize);
 
-	public FileScannerController(String sortFileName, File startDir) {
+	public FileScannerController(File startDir) {
 		this.startDir = startDir;
-		this.sortFile = new File(sortFileName);
 	}
 
 	public void run() {
@@ -40,7 +38,7 @@ class FileScannerController implements Runnable {
 		try {
 			IndexWriterFactory<SizePath> indexWriterFactory = i -> {
 				try {
-					return new JavaSerialIndexWriter<SizePath>(new File(indexName + '.' + i));
+					return new JavaSerialIndexWriter<SizePath>(new File(indexName + '.' + i + ".part"));
 				} catch (IOException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
@@ -57,7 +55,7 @@ class FileScannerController implements Runnable {
 		j.run();
 
 		// wait for jobs to finish
-		FileScannerJob.waitForJobs();
+		waitForJobs();
 
 		try {
 			indexWriter.close();
@@ -67,9 +65,50 @@ class FileScannerController implements Runnable {
 		}
 
 		log.info("Sorting index. Please wait...");
-		IndexReader<SizePath>[] indexReaders = null;
+		File[] indexParts = new File(".").listFiles(f -> f.getName().endsWith(".part"));
+		IndexReader<SizePath>[] indexReaders = new IndexReader[indexParts.length];
+		for(int i = 0, n = indexParts.length; i < n; i++) {
+			try {
+				indexReaders[i] = new JavaSerialIndexReader<SizePath>(indexParts[i]);
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+		}
+
 		IndexWriter<SizePath> indexWrt = null;
+		try {
+			indexWrt = new JavaSerialIndexWriter<>(new File(indexName + ".index"));
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
 		IndexMerger<SizePath> externalSorter = new IndexMerger<SizePath>(maxObjects, comparator, indexReaders, indexWrt);
 		externalSorter.run();
 	}
+
+	private static int jobCount;
+
+	public static void incJobCount() {
+		synchronized (FileScannerController.class) {
+			jobCount++;
+		}
+	}
+
+	public static void waitForJobs() {
+		synchronized (FileScannerController.class) {
+			while(jobCount > 0)
+				try {
+					FileScannerController.class.wait();
+				} catch (InterruptedException e) {}
+		}
+	}
+
+	public static void decJobCount() {
+		synchronized (FileScannerController.class) {
+			jobCount--;
+			FileScannerController.class.notifyAll();
+		}
+	}
+
 }

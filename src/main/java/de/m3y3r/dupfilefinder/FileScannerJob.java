@@ -6,6 +6,7 @@ package de.m3y3r.dupfilefinder;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -20,55 +21,39 @@ public class FileScannerJob implements Runnable {
 	private final File folder;
 	private final SortingIndexWriter<SizePath> indexWriter;
 
-	private static AtomicInteger jobCount = new AtomicInteger();
-
 	public FileScannerJob (File folderToScan, SortingIndexWriter<SizePath> indexWriter) {
 		this.folder = folderToScan;
 		this.indexWriter = indexWriter;
-		jobCount.incrementAndGet();
+		FileScannerController.incJobCount();
 	}
 
 	public void run() {
+		try {
+			File[] files = folder.listFiles();
 
-		File[] files = folder.listFiles();
-
-		if (files != null) {
-			for (File file : files) {
-				if (file.isDirectory()) {
-					try {
-						if(file.getCanonicalPath().equals(file.getAbsolutePath())) {
-							FileScannerJob j = new FileScannerJob(file, indexWriter);
-							DupFileFinder.threadpool.execute(j);
-						} else
-							log.log(Level.FINE, "Skipping {0} - Symbolic link detected!", file);
-					} catch (IOException e) {
-						log.log(Level.SEVERE, "Exception", e);
+			if (files != null) {
+				for (File file : files) {
+					if(Files.isSymbolicLink(file.toPath())) {
+						log.log(Level.FINE, "Skipping {0} - Symbolic link detected!", file);
 					}
-				} else {
-					SizePath entry = new SizePath(file.length(), file.getAbsolutePath());
-					synchronized (indexWriter) {
-						try {
-							indexWriter.writeObject(entry);
-						} catch (IOException e) {
-							log.log(Level.SEVERE, "Exception", e);
+
+					if (file.isDirectory()) {
+						FileScannerJob j = new FileScannerJob(file, indexWriter);
+						DupFileFinder.threadpool.execute(j);
+					} else {
+						SizePath entry = new SizePath(file.length(), file.getAbsolutePath());
+						synchronized (indexWriter) {
+							try {
+								indexWriter.writeObject(entry);
+							} catch (IOException e) {
+								log.log(Level.SEVERE, "Exception", e);
+							}
 						}
 					}
 				}
 			}
-		}
-
-		synchronized (jobCount) {
-			jobCount.decrementAndGet();
-			jobCount.notifyAll();
-		}
-	}
-
-	public static void waitForJobs() {
-		synchronized (jobCount) {
-			while(jobCount.get() > 0)
-				try {
-					jobCount.wait();
-				} catch (InterruptedException e) {}
+		} finally {
+			FileScannerController.decJobCount();
 		}
 	}
 }

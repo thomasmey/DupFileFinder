@@ -31,6 +31,6 @@ public class FileScannerJobTest {
 		SortingIndexWriter<SizePath> indexWriter = new SortingIndexWriter<SizePath>(indexWriterFactory, 100_000, Comparator.comparingLong(SizePath::getFileSize));
 		FileScannerJob job = new FileScannerJob(folderToScan, indexWriter);
 		job.run();
-		FileScannerJob.waitForJobs();
+		FileScannerController.waitForJobs();
 	}
 }

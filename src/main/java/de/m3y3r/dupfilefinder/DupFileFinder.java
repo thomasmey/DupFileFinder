@@ -67,48 +67,46 @@ class DupFileFinder implements Runnable {
 
 	private void processCommand(String cmd) throws ClassNotFoundException, IOException {
 
-		String indexPrefix = "DupFileFinder";
-
 		if("searchDuplicates".equals(cmd)) {
 			processCommand("buildfileSizeIndex");
 			processCommand("buildHashIndex");
 			processCommand("printHashIndex");
 		} else if("buildfileSizeIndex".equals(cmd)) {
 			File startDir = new File(args[1]);
-			buildFileSizeIndex(startDir, indexPrefix);
+			buildFileSizeIndex(startDir);
 		} else if("buildHashIndex".equals(cmd)) {
-			buildHashIndex(indexPrefix);
+			buildHashIndex();
 		} else if("printHashIndex".equals(cmd)) {
-			printHashIndex(indexPrefix);
+			printHashIndex();
 		} else if("printFileSizeIndex".equals(cmd)) {
-			printFileSizeIndex(indexPrefix);
+			printFileSizeIndex();
 		} else if("dedpulicateFiles(String, String)".equals(cmd)) {
-			dedpulicateFiles(indexPrefix, args[1]);
+			dedpulicateFiles(args[1]);
 		} else {
 			log.log(Level.SEVERE,"\"{0}\" = Unknown command! - Aborting", cmd);
 			return;
 		}
 	}
 
-	private void buildHashIndex(String indexPrefix) throws ClassNotFoundException, IOException {
+	private void buildHashIndex() throws ClassNotFoundException, IOException {
 
 		log.info("Build hash index.");
-		File index = new File(indexPrefix + ".fileSize.index");
+		File index = new File("fileSize.index");
 		IndexReader<SizePath> indexReader = new JavaSerialIndexReader<SizePath>(index);
 		Iterator<List<SizePath>> fileSizeIterator = new IndexEntryIterator<SizePath>(indexReader, FileScannerController.comparator);
 		HashController checker = new HashController("SHA-1", fileSizeIterator);
 		checker.run();
 	}
 
-	private void buildFileSizeIndex(File startDir, String indexPrefix) {
+	private void buildFileSizeIndex(File startDir) {
 		log.info("Build file size index.");
-		FileScannerController fsc = new FileScannerController(indexPrefix, startDir);
+		FileScannerController fsc = new FileScannerController(startDir);
 		fsc.run();
 	}
 
-	private void printFileSizeIndex(String indexFileName) throws ClassNotFoundException, IOException {
+	private void printFileSizeIndex() throws ClassNotFoundException, IOException {
 		log.info("Only printing file list");
-		File index = new File(indexFileName + ".fileSize.index");
+		File index = new File("fileSize.index");
 		IndexReader<SizePath> indexReader = new JavaSerialIndexReader<SizePath>(index);
 		Iterator<List<SizePath>> fileSizeIterator = new IndexEntryIterator<SizePath>(indexReader, FileScannerController.comparator);
 
@@ -127,10 +125,10 @@ class DupFileFinder implements Runnable {
 		out.close();
 	}
 
-	private void dedpulicateFiles(String indexPrefix, String fileNameSuffix) throws ClassNotFoundException, IOException {
+	private void dedpulicateFiles(String fileNameSuffix) throws ClassNotFoundException, IOException {
 
 		log.info("Deduplicate files with hardlinks");
-		File index = new File(indexPrefix + ".hash.index");
+		File index = new File("hash.index");
 		IndexReader<HashString> indexReader = new JavaSerialIndexReader<HashString>(index);
 		Iterator<List<HashString>> dupIter = new IndexEntryIterator<HashString>(indexReader, HashController.comparator);
 		while(dupIter.hasNext()) {
@@ -169,11 +167,11 @@ class DupFileFinder implements Runnable {
 		}
 	}
 
-	private void printHashIndex(String indexPrefix) throws ClassNotFoundException, IOException {
+	private void printHashIndex() throws ClassNotFoundException, IOException {
 
 		log.info("Print duplicate files");
 		long dupBytes = 0;
-		File index = new File(indexPrefix + ".hash.index");
+		File index = new File("hash.index");
 		IndexReader<HashString> indexReader = new JavaSerialIndexReader<HashString>(index);
 		Iterator<List<HashString>> dupIter = new IndexEntryIterator<HashString>(indexReader, HashController.comparator);
 
